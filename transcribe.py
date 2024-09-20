@@ -39,40 +39,22 @@ CHUNK_SIZE = int(SAMPLE_RATE * CHUNK_DURATION)  # Size of each chunk in samples
 class InputProcessor:
     def __init__(self, model):
         self.buffer = np.array([], dtype=np.float32)
-        self.last_check = 0
         self.model = model
-
-    def flush(self):
-        result = self.model.transcribe(self.buffer, fp16=False)
-        log("Transcribed text: \n" + result["text"])
-
-        self.buffer = np.array([], dtype=np.float32)
-        self.last_check = 0
+        self.text = ""
 
     def accept(self, chunk):
         self.buffer = np.concatenate((self.buffer, chunk.flatten()))
         pos = len(self.buffer)
-        if pos - self.last_check >= CHUNK_SIZE:
+        if pos >= CHUNK_SIZE:
             #log("Running transcription @ " + str(pos))
-            result = self.model.transcribe(self.buffer, fp16=False)
+            result = self.model.transcribe(self.buffer, initial_prompt=self.text, fp16=False)
 
             #log("Transcription finished: " + str(result))
 
-            segments_no = len(result["segments"])
-            if segments_no > 1:
-                text = result["segments"][0]["text"]
-                for i in range(1, segments_no-1):
-                    text = text + result["segments"][i]["text"]
+            self.text = self.text + result["text"]
+            log(result["text"])
 
-                log("Transcribed text: \n" + text)
-
-                processed = int(result['segments'][segments_no-1]['start'] * SAMPLE_RATE)
-                self.buffer = self.buffer[processed:]
-
-                self.last_check = self.last_check - processed
-            else:
-                print(result["text"], end='\r')
-                self.last_check = pos
+            self.buffer = np.array([], dtype=np.float32)
 
 
 def transcribe_audio(model):
@@ -90,8 +72,6 @@ def transcribe_audio(model):
             log("Transcription stopped. Still processing what's left in the buffer.")
             dorec = False
             pass
-
-    proc.flush()
 
 # Now, we start streaming from the microphone and run reading loop
 with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, callback=push_audio_chunk, dtype='float32'):
